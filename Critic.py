@@ -1,62 +1,70 @@
 import numpy as np
 import tensorflow as tf
 
-GAMMA = 0.9
-
-
-class Critic(object):
-    def __init__(self, sess, n_features, lr=0.01):
-        """
-        Critic graph. State is input and value of state is output.
-        :param sess:
-        :param n_features:
-        :param lr:
-        """
+class Critic:
+    def __init__(self, sess, network, learning_rate):
         self.sess = sess
+        self.learning_rate = learning_rate
 
-        self.s = tf.placeholder(tf.float32, [1, n_features], "state")
-        self.v_ = tf.placeholder(tf.placeholder(tf.float32, [1, 1], "v_next"))
-        self.r = tf.placeholder(tf.float32, None, 'r')
+        # Create the critic network
+        self.state, self.action = network.get_input_state_action(is_target=False)
+        self.out = network.get_critic_out(is_target=False)
+        self.params = network.get_critic_params(is_target=False)
 
-        with tf.variable_scope("Critic"):
-            l1 = tf.layers.dense(
-                inputs=self.s,
-                units=20,
-                activation=tf.nn.relu,
-                kernel_initializer=tf.random_normal_initializer(0, 0.1),
-                bias_initializer=tf.constant_initializer(0.1),
-                name='l1'
-            )
+        # Network target (y_i)
+        self.predicted_q_value = tf.placeholder(tf.float32, [None, 1])
 
-            self.v = tf.layers.dense(
-                inputs=l1,
-                units=1,
-                activation=None,
-                kernel_initializer=tf.random_normal_initializer(0, 0.1),
-                bias_initializer=tf.constant_initializer(0.1),
-                name="V"
-            )
+        # Define loss and optimization Op
+        # self.loss = tflearn.mean_square(self.predicted_q_value, self.out)
+        self.loss = tf.nn.l2_loss(self.predicted_q_value - self.out)
+        self.optimize = tf.train.AdamOptimizer(self.learning_rate).minimize(self.loss)
 
-        # v
-        with tf.variable_scope("squared_TD_error"):
-            self.td_error = self.r + GAMMA * self.v_ - self.v
-            self.loss = tf.square(self.td_error)
+        self.action_grads = tf.gradients(self.out, self.action)
 
-        with tf.variable_scope("train"):
-            self.train_op = tf.train.AdamOptimizer(lr).minimize(self.loss)
+    def train(self, state, action, predicted_q_value):
+        return self.sess.run([self.out, self.optimize], feed_dict={
+            self.state: state,
+            self.action: action,
+            self.predicted_q_value: predicted_q_value
+        })
 
-    def learn(self, s, r, s_):
-        """
-        learn the value of state
-        evaluate by TD_error
-        :param s:
-        :param r:
-        :param s_:
-        :return:
-        """
-        s, s_ = s[np.newaxis, :], s_[np.newaxis, :]
+    def predict(self, state, action):
+        return self.sess.run(self.out, feed_dict={
+            self.state: state,
+            self.action: action
+        })
 
-        v_ = self.sess.run(self.v, {self.s: s_})
-        td_error, _ = self.sess.run([self.td_error, self.train_op], {self.s: s, self.v_:v_, self.r: r})
+    def action_gradients(self, state, actions):
+        return self.sess.run(self.action_grads, feed_dict={
+            self.state: state,
+            self.action: actions
+        })
 
-        return td_error
+
+class CriticTarget:
+    def __init__(self, sess, network, tau):
+        self.sess = sess
+        self.tau = tau
+
+        # Create the critic network
+        self.state, self.action = network.get_input_state_action(is_target=True)
+        self.out = network.get_critic_out(is_target=True)
+
+        # update target network
+        self.params = network.get_critic_params(is_target=True)
+        param_num = len(self.params)
+        self.params_other = network.get_critic_params(is_target=False)
+        assert (param_num == len(self.params_other))
+        self.update_params = \
+            [self.params[i].assign(
+                tf.multiply(self.params_other[i], self.tau) + tf.multiply(self.params[i], 1. - self.tau))
+             for i in range(param_num)]
+
+    def predict(self, state, action):
+        return self.sess.run(self.out, feed_dict={
+            self.state: state,
+            self.action: action
+        })
+
+    def train(self):
+        self.sess.run(self.update_params)
