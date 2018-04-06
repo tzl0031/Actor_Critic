@@ -1,9 +1,8 @@
-
 import numpy as np
 import tensorflow as tf
 
 
-class Actor():
+class Actor:
 
     def __init__(self, sess, network, learning_rate):
         self.sess = sess
@@ -21,7 +20,7 @@ class Actor():
         self.policy_gradient = tf.gradients(tf.multiply(self.out, -self.critic_gradient), self.params)
 
         # Optimization Op
-        self.optimize = tf.train.AdamOptimizer(self.learning_rate).\
+        self.optimize = tf.train.AdamOptimizer(self.learning_rate). \
             apply_gradients(zip(self.policy_gradient, self.params))
 
     def train(self, state, c_gradient):
@@ -36,7 +35,7 @@ class Actor():
         })
 
 
-class ActorTarget():
+class ActorTarget:
 
     def __init__(self, sess, network, tau):
         self.sess = sess
@@ -47,13 +46,13 @@ class ActorTarget():
         self.params = network.get_actor_params(is_target=True)
         param_num = len(self.params)
         self.params_other = network.get_actor_params(is_target=False)
-        assert(param_num == len(self.params_other))
+        assert param_num == len(self.params_other)
 
         # update target network
         self.update_params = \
             [self.params[i].assign(tf.multiply(self.params_other[i], self.tau) +
-                                                  tf.multiply(self.params[i], 1. - self.tau))
-                for i in range(param_num)]
+                                   tf.multiply(self.params[i], 1. - self.tau))
+             for i in range(param_num)]
 
     def train(self):
         self.sess.run(self.update_params)

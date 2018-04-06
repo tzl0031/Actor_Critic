@@ -13,7 +13,7 @@ class NeuralNetworks:
 
     def __init__(self, state_dim, action_dim, action_bound):
         # size of layers
-        self._S_FEATURE_DIM = 20
+        self._S_FEATURE_DIM = 100
         self._ACTOR_H1_DIM = 20
         self._CRITIC_H1_DIM = 20
 
@@ -120,9 +120,11 @@ class NeuralNetworks:
 
     def _create_actors(self, feature):
 
-        w1 = NeuralNetworks.weight_variable([self._S_FEATURE_DIM, self._ACTOR_H1_DIM])
-        b1 = NeuralNetworks.bias_variable([self._ACTOR_H1_DIM])
+        w1 = NeuralNetworks.weight_variable([self._S_FEATURE_DIM, self._A_DIM])
+        b1 = NeuralNetworks.bias_variable([self._A_DIM])
         h1 = tf.nn.relu(tf.matmul(feature, w1) + b1)
+        # print(h1.shape)
+        # print(self._A_BOUND.shape)
         y = tf.multiply(h1, self._A_BOUND)
         return y
 
