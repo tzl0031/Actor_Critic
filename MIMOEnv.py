@@ -12,7 +12,7 @@ class MIMOEnv(gym.Env):
         self.p_max = 1
         self.q_min = -1
         self.q_max = 1
-        self.capacity = 20
+        self.capacity = 0.2
         self.alpha = 1
         self.pd = 1
 
@@ -42,6 +42,7 @@ class MIMOEnv(gym.Env):
         :return: Next state, reward, done or not, {}
         """
         p, q = self.state
+        action = np.clip(action, -1, 1)
         new_p = np.clip(p + action[0], self.p_min, self.p_max)
         new_q = np.clip(q + action[1], self.q_min, self.q_max)
         # print("new_state")
@@ -50,8 +51,9 @@ class MIMOEnv(gym.Env):
         hh_ = new_p**2 + new_q**2
         self.last_action = action
         snr = self.alpha * self.pd * hh_/(self.alpha * self.pd * np.sum(self.HH_) + 1)
-        if abs(self.capacity - snr) < 0.1:
-            reward = 1
+        # print("snr", snr)
+        if abs(self.capacity - snr) < 0.01:
+            reward = 0.01
         else:
             reward = -abs(self.capacity - snr)
 

@@ -1,61 +1,91 @@
 import numpy as np
 import tensorflow as tf
+import math
+
+LEARNING_RATE = 1e-3
+LAYER1_SIZE = 30
+LAYER2_SIZE = 20
+TAU = 0.001
+BATCH_SIZE = 64
 
 
-class Actor:
+class ActorNetwork:
 
-    def __init__(self, sess, network, learning_rate):
+    def __init__(self, sess, state_dim, action_dim):
         self.sess = sess
-        self.learning_rate = learning_rate
-        _, self.a_dim, _ = network.get_const()
+        self.state_dim = state_dim
+        self.action_dim = action_dim
+        # create actor network
+        self.state_input, self.action_output, self.net = self.create_network(state_dim, action_dim)
 
-        self.inputs = network.get_input_state(is_target=False)
-        self.out = network.get_actor_out(is_target=False)
-        self.params = network.get_actor_params(is_target=False)
+        # create target actor network
+        self.target_state_input, self.target_action_output, self.target_update, self.target_net = self.create_target_network(
+            state_dim, action_dim, self.net)
 
-        # This gradient will be provided by the critic network
-        self.critic_gradient = tf.placeholder(tf.float32, [None, self.a_dim])
+        # define training rules
+        self.q_gradient_input = tf.placeholder("float", [None, self.action_dim])
+        self.parameters_gradients = tf.gradients(self.action_output, self.net, -self.q_gradient_input)
+        self.optimizer = tf.train.AdamOptimizer(LEARNING_RATE).apply_gradients(zip(self.parameters_gradients, self.net))
 
-        # Combine the gradients
-        self.policy_gradient = tf.gradients(tf.multiply(self.out, -self.critic_gradient), self.params)
 
-        # Optimization Op
-        self.optimize = tf.train.AdamOptimizer(self.learning_rate). \
-            apply_gradients(zip(self.policy_gradient, self.params))
+        self.sess.run(tf.initialize_all_variables())
+        self.update_target()
 
-    def train(self, state, c_gradient):
-        self.sess.run(self.optimize, feed_dict={
-            self.inputs: state,
-            self.critic_gradient: c_gradient
+    def create_network(self, state_dim, action_dim):
+        layer1_size = LAYER1_SIZE
+        layer2_size = LAYER2_SIZE
+
+        state_input = tf.placeholder("float", [None, state_dim])
+
+        W1 = self.variable([state_dim, layer1_size], state_dim)
+        b1 = self.variable([layer1_size], state_dim)
+        W2 = self.variable([layer1_size, layer2_size], layer1_size)
+        b2 = self.variable([layer2_size], layer1_size)
+        W3 = tf.Variable(tf.random_uniform([layer2_size, action_dim], -3e-3, 3e-3))
+        b3 = tf.Variable(tf.random_uniform([action_dim], -3e-3, 3e-3))
+
+        layer1 = tf.nn.relu(tf.matmul(state_input, W1) + b1)
+        layer2 = tf.nn.relu(tf.matmul(layer1, W2) + b2)
+        action_output = tf.tanh(tf.matmul(layer2, W3) + b3)
+
+        return state_input, action_output, [W1, b1, W2, b2, W3, b3]
+
+    def create_target_network(self, state_dim, action_dim, net):
+        state_input = tf.placeholder("float", [None, state_dim])
+        ema = tf.train.ExponentialMovingAverage(decay=1 - TAU)
+        target_update = ema.apply(net)
+        target_net = [ema.average(x) for x in net]
+
+        layer1 = tf.nn.relu(tf.matmul(state_input, target_net[0]) + target_net[1])
+        layer2 = tf.nn.relu(tf.matmul(layer1, target_net[2]) + target_net[3])
+        action_output = tf.tanh(tf.matmul(layer2, target_net[4]) + target_net[5])
+
+        return state_input, action_output, target_update, target_net
+
+    def update_target(self):
+        self.sess.run(self.target_update)
+
+    def train(self, q_gradient_batch, state_batch):
+        self.sess.run(self.optimizer, feed_dict={
+            self.q_gradient_input: q_gradient_batch,
+            self.state_input: state_batch
         })
 
-    def predict(self, state):
-        return self.sess.run(self.out, feed_dict={
-            self.inputs: state
+    def actions(self, state_batch):
+        return self.sess.run(self.action_output, feed_dict={
+            self.state_input: state_batch
         })
 
+    def action(self, state):
+        return self.sess.run(self.action_output, feed_dict={
+            self.state_input: [state]
+        })[0]
 
-class ActorTarget:
+    def target_actions(self, state_batch):
+        return self.sess.run(self.target_action_output, feed_dict={
+            self.target_state_input: state_batch
+        })
 
-    def __init__(self, sess, network, tau):
-        self.sess = sess
-        self.tau = tau
-
-        self.inputs = network.get_input_state(is_target=True)
-        self.out = network.get_actor_out(is_target=True)
-        self.params = network.get_actor_params(is_target=True)
-        param_num = len(self.params)
-        self.params_other = network.get_actor_params(is_target=False)
-        assert param_num == len(self.params_other)
-
-        # update target network
-        self.update_params = \
-            [self.params[i].assign(tf.multiply(self.params_other[i], self.tau) +
-                                   tf.multiply(self.params[i], 1. - self.tau))
-             for i in range(param_num)]
-
-    def train(self):
-        self.sess.run(self.update_params)
-
-    def predict(self, state):
-        return self.sess.run(self.out, feed_dict={self.inputs: state})
+    # f fan-in size
+    def variable(self, shape, f):
+        return tf.Variable(tf.random_uniform(shape, -1 / math.sqrt(f), 1 / math.sqrt(f)))
